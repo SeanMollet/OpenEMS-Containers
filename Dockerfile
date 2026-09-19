@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && apt-get update && apt-get install -y --no-install-recommends \
         cuda-nvcc-${CUDA_VERSION} cuda-cudart-dev-${CUDA_VERSION} \
         build-essential cmake git rsync time bsdextrautils \
+        openssh-server tmux wget curl less locales sudo software-properties-common \
         libhdf5-dev libvtk9-dev libcgal-dev libtinyxml-dev libgmp-dev libmpfr-dev \
         libboost-program-options-dev libboost-thread-dev libboost-date-time-dev \
         libboost-serialization-dev libboost-chrono-dev libboost-system-dev \
@@ -69,10 +70,12 @@ COPY sitecustomize.py /opt/openEMS/tools/inject/
 ENV PATH=/opt/openEMS/tools:/opt/openEMS/bin:/usr/local/cuda/bin:${PATH}
 WORKDIR /workspace
 
-# what the runtime image gets from apt: its libraries are not copied (see collect-runtime-libs);
-# bsdextrautils: column
+# what the runtime image gets from apt: its libraries are not copied (see collect-runtime-libs).
+# bsdextrautils: column. The rest is what Vast.ai installs into a container at every start:
+# having them saves that wait (https://docs.vast.ai).
 FROM base AS runtime-base
 RUN apt-get update && apt-get install -y --no-install-recommends python3 bsdextrautils \
+        openssh-server tmux git wget curl less locales sudo software-properties-common rsync \
     && rm -rf /var/lib/apt/lists/*
 
 FROM runtime-base AS runtime-packages

@@ -20,9 +20,9 @@ with GPU monitoring.
 
 Neither image contains an NVIDIA driver. The NVIDIA Container Toolkit of the host mounts
 the host's driver libraries and `nvidia-smi` (`NVIDIA_DRIVER_CAPABILITIES=compute,utility`),
-so they always match its kernel module. Built with CUDA 12.8: drivers 570 and newer run
-it; older CUDA 12 drivers (525+) should through CUDA's minor version compatibility
-(untested).
+so they always match its kernel module. Built with CUDA 12.8, it runs with any driver of the CUDA
+12 series (525 or newer) through CUDA's minor version compatibility; tested with
+550 (a GTX 1080 Ti) and 595.
 
 ## Build
 
