@@ -32,7 +32,9 @@ build() {  # build <dir> <cmake options...>: configure once, then make and insta
 echo "build-openems: $SRC, CUDA architecture $ARCH"
 build fparser
 build CSXCAD -DFPARSER_ROOT_DIR=$P
-build openEMS -DFPARSER_ROOT_DIR=$P -DCSXCAD_ROOT_DIR=$P -DCMAKE_CUDA_ARCHITECTURES=$ARCH
+# -Wno-deprecated-gpu-targets: nvcc 12.8 warns about the architectures before Turing
+build openEMS -DFPARSER_ROOT_DIR=$P -DCSXCAD_ROOT_DIR=$P -DCMAKE_CUDA_ARCHITECTURES=$ARCH \
+              -DCMAKE_CUDA_FLAGS=-Wno-deprecated-gpu-targets
 grep -h "CUDA GPU backend" $LOG/build_openEMS_cmake.log 2>/dev/null || true
 
 [ "${BUILD_PYTHON:-1}" = 0 ] && { echo "build-openems: done (without the Python bindings)"; exit 0; }

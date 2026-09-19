@@ -13,9 +13,9 @@ Images on Docker Hub:
   has only the shared libraries openEMS loads (copied from the build, see
   `collect-runtime-libs`) and Python and `column` from apt.
 
-The CUDA engine is built for Turing to Blackwell (`75-real;80-real;86-real;89-real;
-90-real;100-real;120`, the build argument `CUDA_ARCHITECTURES`), with PTX of the newest
-for later GPUs: one image for all NVIDIA GPUs. Both images have btop, built from source
+The CUDA engine is built for Pascal to Blackwell (`60-real;61-real;70-real;75-real;
+80-real;86-real;89-real;90-real;100-real;120`, the build argument `CUDA_ARCHITECTURES`),
+with PTX of the newest for later GPUs: one image for all NVIDIA GPUs. Both images have btop, built from source
 with GPU monitoring.
 
 Neither image contains an NVIDIA driver. The NVIDIA Container Toolkit of the host mounts

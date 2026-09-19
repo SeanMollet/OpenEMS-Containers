@@ -17,8 +17,8 @@
 ARG UBUNTU=ubuntu:24.04
 ARG CUDA_VERSION=12-8
 ARG BTOP_VERSION=v1.4.7
-# machine code for Turing to Blackwell, and PTX of the newest for later GPUs
-ARG CUDA_ARCHITECTURES="75-real;80-real;86-real;89-real;90-real;100-real;120"
+# machine code for Pascal to Blackwell, and PTX of the newest for later GPUs
+ARG CUDA_ARCHITECTURES="60-real;61-real;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120"
 ARG OPENEMS_SOURCE=github
 
 FROM ${UBUNTU} AS base
