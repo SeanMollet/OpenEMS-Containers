@@ -2,14 +2,24 @@
 # usage: build-openems [source dir]  -- build fparser, CSXCAD and openEMS into /opt/openEMS and
 # install the Python bindings. The source dir (default /workspace/openEMS-Project) holds the
 # fparser, CSXCAD and openEMS directories. Rebuilds are incremental.
-# The CUDA architecture is the one of the local GPU, or CUDA_ARCH (e.g. CUDA_ARCH=86, or a list
-# "75-real;86"). BUILD_PYTHON=0 skips the Python bindings.
+# The GPU backend is HIP, which compiles for AMD through ROCm and for NVIDIA through CUDA.
+# HIP_PLATFORM picks the vendor (default: whichever compiler the image has), and the
+# architecture is the one of the local GPU or GPU_ARCH: "86" or "75-real;86" on NVIDIA,
+# "gfx942" on AMD. BUILD_PYTHON=0 skips the Python bindings.
 set -e
 SRC=${1:-/workspace/openEMS-Project}
 P=/opt/openEMS
 B=/workspace/build
 J=$(nproc)
-ARCH=${CUDA_ARCH:-$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d .)}
+PLATFORM=${HIP_PLATFORM:-$(command -v hipconfig > /dev/null && hipconfig --platform 2>/dev/null)}
+PLATFORM=${PLATFORM:-nvidia}
+if [ -n "$GPU_ARCH" ]; then
+	ARCH=$GPU_ARCH
+elif [ "$PLATFORM" = amd ]; then
+	ARCH=$(rocminfo 2>/dev/null | grep -m1 -o 'gfx[0-9a-f]*')
+else
+	ARCH=${CUDA_ARCH:-$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d .)}
+fi
 LOG=/workspace/logs
 mkdir -p $B $LOG
 
@@ -29,13 +39,21 @@ build() {  # build <dir> <cmake options...>: configure once, then make and insta
 	step $dir make -C $B/$dir -j$J install
 }
 
-echo "build-openems: $SRC, CUDA architecture $ARCH"
+echo "build-openems: $SRC, HIP platform $PLATFORM, architecture $ARCH"
 build fparser
 build CSXCAD -DFPARSER_ROOT_DIR=$P
+HIP_OPTS="-DCMAKE_HIP_PLATFORM=$PLATFORM -DCMAKE_HIP_ARCHITECTURES=$ARCH"
 # -Wno-deprecated-gpu-targets: nvcc 12.8 warns about the architectures before Turing
-build openEMS -DFPARSER_ROOT_DIR=$P -DCSXCAD_ROOT_DIR=$P -DCMAKE_CUDA_ARCHITECTURES=$ARCH \
-              -DCMAKE_CUDA_FLAGS=-Wno-deprecated-gpu-targets
-grep -h "CUDA GPU backend" $LOG/build_openEMS_cmake.log 2>/dev/null || true
+[ "$PLATFORM" = nvidia ] && HIP_OPTS="$HIP_OPTS -DCMAKE_HIP_FLAGS=-Wno-deprecated-gpu-targets"
+build openEMS -DFPARSER_ROOT_DIR=$P -DCSXCAD_ROOT_DIR=$P $HIP_OPTS
+# without a HIP compiler CMake leaves the GPU backend out and the build still succeeds,
+# which is a CPU-only openEMS that looks like a working one until it runs
+if ! grep -qh "HIP GPU backend enabled" $LOG/build_openEMS_cmake.log 2>/dev/null; then
+	echo "build-openems: no GPU backend in this build (CMake found no HIP compiler)"
+	grep -iE "hip" $LOG/build_openEMS_cmake.log | head -5
+	exit 1
+fi
+grep -h "HIP GPU backend" $LOG/build_openEMS_cmake.log
 
 [ "${BUILD_PYTHON:-1}" = 0 ] && { echo "build-openems: done (without the Python bindings)"; exit 0; }
 for py in CSXCAD openEMS; do

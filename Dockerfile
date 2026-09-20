@@ -1,8 +1,12 @@
-# openEMS images with the CUDA GPU engine, from plain Ubuntu (see README.md). Targets:
-#   dev:     the build tools, the CUDA compiler and the dependencies of openEMS; sync the
-#            sources and run build-openems
-#   runtime: openEMS and its Python bindings, built in dev for all supported GPU
-#            architectures, with only the libraries they load; no build tools
+# openEMS images with the HIP GPU engine, from plain Ubuntu (see README.md). The engine
+# compiles for both vendors from one source, so there is an image per vendor: an AMD user
+# has no reason to carry CUDA, nor an NVIDIA user ROCm. Targets:
+#   dev:         build tools, the CUDA compiler and HIP over it, and the dependencies of
+#                openEMS; sync the sources and run build-openems
+#   dev-amd:     the same with ROCm, for AMD GPUs
+#   runtime:     openEMS and its Python bindings for NVIDIA, built in dev for all supported
+#                architectures, with only the libraries they load; no build tools
+#   runtime-amd: the same for AMD, with the ROCm runtime
 # Build context: this directory (the scripts). The openEMS sources of the runtime target:
 # - OPENEMS_SOURCE=github (default): openEMS from the GPU branch on GitHub, CSXCAD and fparser
 #   from upstream at the commits it is tested with,
@@ -19,6 +23,9 @@ ARG CUDA_VERSION=12-8
 ARG BTOP_VERSION=v1.4.7
 # machine code for Pascal to Blackwell, and PTX of the newest for later GPUs
 ARG CUDA_ARCHITECTURES="60-real;61-real;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120"
+# CDNA 2 and 3 (MI200, MI300) and RDNA 3 (RX 7000): the AMD GPUs the engine is built for
+ARG AMD_ARCHITECTURES="gfx90a;gfx942;gfx1100"
+ARG ROCM_REPO=https://repo.radeon.com/rocm/apt/latest
 ARG OPENEMS_SOURCE=github
 
 FROM ${UBUNTU} AS base
@@ -37,16 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && make -C /tmp/btop install PREFIX=/usr/local DESTDIR=/out \
     && strip /out/usr/local/bin/btop
 
-FROM base AS dev
-ARG CUDA_VERSION
-# the CUDA compiler and runtime from NVIDIA's repository, the build dependencies of fparser,
-# CSXCAD and openEMS
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
-    && curl -fsSL -o /tmp/cuda-keyring.deb \
-        https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
-    && dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb \
-    && apt-get update && apt-get install -y --no-install-recommends \
-        cuda-nvcc-${CUDA_VERSION} cuda-cudart-dev-${CUDA_VERSION} \
+# everything both dev images need, without a GPU toolchain
+FROM base AS dev-common
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
         build-essential cmake git rsync time bsdextrautils \
         openssh-server tmux wget curl less locales sudo software-properties-common \
         libhdf5-dev libvtk9-dev libcgal-dev libtinyxml-dev libgmp-dev libmpfr-dev \
@@ -66,9 +66,42 @@ RUN git config --system --add safe.directory '*'
 COPY --from=btop /out/usr/local/ /usr/local/
 COPY build-openems run-test run-bench collect-runtime-libs /opt/openEMS/tools/
 COPY sitecustomize.py /opt/openEMS/tools/inject/
-
-ENV PATH=/opt/openEMS/tools:/opt/openEMS/bin:/usr/local/cuda/bin:${PATH}
 WORKDIR /workspace
+
+# NVIDIA: the CUDA compiler and runtime from NVIDIA's repository, and HIP over them. On this
+# platform HIP is headers and a wrapper around nvcc, and the binaries link the CUDA runtime.
+FROM dev-common AS dev
+ARG CUDA_VERSION
+ARG ROCM_REPO
+RUN curl -fsSL -o /tmp/cuda-keyring.deb \
+        https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb \
+    && curl -fsSL ${ROCM_REPO%/apt/latest}/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg \
+    && echo "deb [arch=amd64] ${ROCM_REPO} noble main" > /etc/apt/sources.list.d/rocm.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        cuda-nvcc-${CUDA_VERSION} cuda-cudart-dev-${CUDA_VERSION} cuda-profiler-api-${CUDA_VERSION} \
+        hip-dev hipcc-nvidia rocm-core \
+    && rm -rf /var/lib/apt/lists/*
+ENV HIP_PLATFORM=nvidia \
+    PATH=/opt/openEMS/tools:/opt/openEMS/bin:/opt/rocm/bin:/usr/local/cuda/bin:${PATH}
+
+# AMD: the ROCm compiler. Here HIP is a runtime library the binaries link.
+FROM dev-common AS dev-amd
+ARG ROCM_REPO
+# Ubuntu carries ROCm 5.7 packages of its own, and a mix of the two puts the headers of one
+# beside the compiler of the other (__AMDGCN_WAVEFRONT_SIZE undeclared). The pin keeps every
+# ROCm package on the AMD repository.
+RUN curl -fsSL ${ROCM_REPO%/apt/latest}/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg \
+    && echo "deb [arch=amd64] ${ROCM_REPO} noble main" > /etc/apt/sources.list.d/rocm.list \
+    && printf 'Package: *\nPin: origin repo.radeon.com\nPin-Priority: 1001\n' > /etc/apt/preferences.d/rocm \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        hipcc hip-dev rocm-device-libs rocm-llvm comgr hsa-rocr-dev rocminfo rocm-smi-lib \
+    && rm -rf /var/lib/apt/lists/*
+# ROCM_PATH: CMake looks for the HIP compiler under it (/opt/rocm/llvm/bin/clang++) and
+# finds nothing without it, which would leave the GPU backend out of the build
+ENV HIP_PLATFORM=amd \
+    ROCM_PATH=/opt/rocm \
+    PATH=/opt/openEMS/tools:/opt/openEMS/bin:/opt/rocm/bin:${PATH}
 
 # what the runtime image gets from apt: its libraries are not copied (see collect-runtime-libs).
 # bsdextrautils: column. The rest is what Vast.ai installs into a container at every start:
@@ -81,6 +114,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 bsdextr
 FROM runtime-base AS runtime-packages
 RUN dpkg-query -W -f='${Package}\n' > /runtime.packages
 
+# the AMD runtime image carries the ROCm runtime, so its libraries must not be collected
+FROM runtime-base AS runtime-amd-base
+ARG ROCM_REPO
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && curl -fsSL ${ROCM_REPO%/apt/latest}/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg \
+    && echo "deb [arch=amd64] ${ROCM_REPO} noble main" > /etc/apt/sources.list.d/rocm.list \
+    && printf 'Package: *\nPin: origin repo.radeon.com\nPin-Priority: 1001\n' > /etc/apt/preferences.d/rocm \
+    && apt-get update && apt-get install -y --no-install-recommends hip-runtime-amd rocm-smi-lib \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM runtime-amd-base AS runtime-amd-packages
+RUN dpkg-query -W -f='${Package}\n' > /runtime.packages
+
 # the openEMS sources in /src, see OPENEMS_SOURCE
 FROM base AS src-local
 COPY --from=openems-src fparser /src/fparser
@@ -88,7 +134,7 @@ COPY --from=openems-src CSXCAD /src/CSXCAD
 COPY --from=openems-src openEMS /src/openEMS
 COPY --from=openems-src .git/modules /src/.git/modules
 
-FROM dev AS src-github
+FROM dev-common AS src-github
 ARG OPENEMS_REPO=SeanMollet/openEMS
 ARG OPENEMS_BRANCH=GPU_experiments
 ARG CSXCAD_COMMIT=a3af8b0e05acf9364408accfc3de109b3be87aa0
@@ -125,6 +171,27 @@ RUN set -e; P=/opt/openEMS; \
 COPY --from=runtime-packages /runtime.packages /tmp/
 RUN collect-runtime-libs /tmp/runtime.packages /opt/openEMS/deps /opt/openEMS/bin /opt/openEMS/lib /opt/openEMS/venv
 
+# the same for AMD, from the ROCm dev image
+FROM dev-amd AS openems-build-amd
+ARG AMD_ARCHITECTURES
+COPY --from=src /src /src
+RUN GPU_ARCH="${AMD_ARCHITECTURES}" BUILD_PYTHON=0 build-openems /src
+RUN set -e; P=/opt/openEMS; \
+    for py in CSXCAD openEMS; do \
+        cd /src/$py/python && rm -rf build; \
+        CSXCAD_INSTALL_PATH=$P OPENEMS_INSTALL_PATH=$P $P/venv/bin/pip wheel --no-build-isolation --no-deps -w /wheels .; \
+        $P/venv/bin/pip install --no-deps /wheels/$(echo $py | tr A-Z a-z)-*.whl; \
+    done; \
+    rm -rf $P/venv; \
+    python3 -m venv $P/venv; \
+    $P/venv/bin/pip install --no-cache-dir numpy h5py matplotlib /wheels/*.whl; \
+    for f in $(find $P/bin $P/lib $P/venv/lib/python3*/site-packages/CSXCAD $P/venv/lib/python3*/site-packages/openEMS \
+               -type f \( -name '*.so*' -o -perm -u+x \)); do \
+        strip --strip-unneeded $f 2>/dev/null || true; \
+    done
+COPY --from=runtime-amd-packages /runtime.packages /tmp/
+RUN collect-runtime-libs /tmp/runtime.packages /opt/openEMS/deps /opt/openEMS/bin /opt/openEMS/lib /opt/openEMS/venv
+
 FROM runtime-base AS runtime
 COPY --from=btop /out/usr/local/ /usr/local/
 COPY --from=openems-build /opt/openEMS/bin /opt/openEMS/bin
@@ -132,6 +199,20 @@ COPY --from=openems-build /opt/openEMS/lib /opt/openEMS/lib
 COPY --from=openems-build /opt/openEMS/deps /opt/openEMS/deps
 COPY --from=openems-build /opt/openEMS/venv /opt/openEMS/venv
 # every library resolves (the CUDA driver is loaded at run time), and the bindings import
+RUN printf '/opt/openEMS/lib\n/opt/openEMS/deps\n' > /etc/ld.so.conf.d/openems.conf && ldconfig \
+    && ! find /opt/openEMS -type f \( -name '*.so*' -o -perm -u+x \) -exec ldd {} + 2>/dev/null | grep "not found" \
+    && cd /tmp && /opt/openEMS/venv/bin/python -c "import CSXCAD, openEMS, h5py, matplotlib"
+ENV PATH=/opt/openEMS/venv/bin:/opt/openEMS/bin:${PATH}
+WORKDIR /workspace
+
+FROM runtime-amd-base AS runtime-amd
+COPY --from=btop /out/usr/local/ /usr/local/
+COPY --from=openems-build-amd /opt/openEMS/bin /opt/openEMS/bin
+COPY --from=openems-build-amd /opt/openEMS/lib /opt/openEMS/lib
+COPY --from=openems-build-amd /opt/openEMS/deps /opt/openEMS/deps
+COPY --from=openems-build-amd /opt/openEMS/venv /opt/openEMS/venv
+# every library resolves (the kernel driver is on the host, /dev/kfd and /dev/dri are passed
+# to the container), and the bindings import
 RUN printf '/opt/openEMS/lib\n/opt/openEMS/deps\n' > /etc/ld.so.conf.d/openems.conf && ldconfig \
     && ! find /opt/openEMS -type f \( -name '*.so*' -o -perm -u+x \) -exec ldd {} + 2>/dev/null | grep "not found" \
     && cd /tmp && /opt/openEMS/venv/bin/python -c "import CSXCAD, openEMS, h5py, matplotlib"
