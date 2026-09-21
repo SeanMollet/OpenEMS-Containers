@@ -23,8 +23,11 @@ ARG CUDA_VERSION=12-8
 ARG BTOP_VERSION=v1.4.7
 # machine code for Pascal to Blackwell, and PTX of the newest for later GPUs
 ARG CUDA_ARCHITECTURES="60-real;61-real;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120"
-# CDNA 2 and 3 (MI200, MI300) and RDNA 3 (RX 7000): the AMD GPUs the engine is built for
-ARG AMD_ARCHITECTURES="gfx90a;gfx942;gfx1100"
+# The AMD GPUs the engine is built for: CDNA 1 to 3 (MI100, MI200, MI300, MI350), RDNA 2
+# (RX 6000), RDNA 3 (RX 7000, and the Phoenix and Strix Halo APUs) and RDNA 4 (RX 9000).
+# A GPU outside the list falls back to the CPU, so the list is what makes the image useful
+# on a given machine; every entry is a full compile of the kernels.
+ARG AMD_ARCHITECTURES="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1151;gfx1200;gfx1201"
 ARG ROCM_REPO=https://repo.radeon.com/rocm/apt/latest
 ARG OPENEMS_SOURCE=github
 
@@ -73,6 +76,8 @@ WORKDIR /workspace
 # link the CUDA runtime, so hip-dev is enough: hipcc-nvidia would bring a hipcc of its own
 # and collide with the one of hip-dev over the same file. build-openems names the compiler
 # rather than have CMake look for it, which is what would have wanted hipcc.
+# The pin is the one of the AMD images: Ubuntu carries ROCm 5.7 of its own, and the headers
+# of the two releases do not mix (__AMDGCN_WAVEFRONT_SIZE is undeclared in the older ones).
 FROM dev-common AS dev
 ARG CUDA_VERSION
 ARG ROCM_REPO
@@ -81,6 +86,7 @@ RUN curl -fsSL -o /tmp/cuda-keyring.deb \
     && dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb \
     && curl -fsSL ${ROCM_REPO%/apt/latest}/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg \
     && echo "deb [arch=amd64] ${ROCM_REPO} noble main" > /etc/apt/sources.list.d/rocm.list \
+    && printf 'Package: *\nPin: origin repo.radeon.com\nPin-Priority: 1001\n' > /etc/apt/preferences.d/rocm \
     && apt-get update && apt-get install -y --no-install-recommends \
         cuda-nvcc-${CUDA_VERSION} cuda-cudart-dev-${CUDA_VERSION} cuda-profiler-api-${CUDA_VERSION} \
         cuda-cuobjdump-${CUDA_VERSION} \
