@@ -69,7 +69,10 @@ COPY sitecustomize.py /opt/openEMS/tools/inject/
 WORKDIR /workspace
 
 # NVIDIA: the CUDA compiler and runtime from NVIDIA's repository, and HIP over them. On this
-# platform HIP is headers and a wrapper around nvcc, and the binaries link the CUDA runtime.
+# platform HIP is headers over the CUDA runtime, nvcc compiles the kernels and the binaries
+# link the CUDA runtime, so hip-dev is enough: hipcc-nvidia would bring a hipcc of its own
+# and collide with the one of hip-dev over the same file. build-openems names the compiler
+# rather than have CMake look for it, which is what would have wanted hipcc.
 FROM dev-common AS dev
 ARG CUDA_VERSION
 ARG ROCM_REPO
@@ -80,7 +83,8 @@ RUN curl -fsSL -o /tmp/cuda-keyring.deb \
     && echo "deb [arch=amd64] ${ROCM_REPO} noble main" > /etc/apt/sources.list.d/rocm.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         cuda-nvcc-${CUDA_VERSION} cuda-cudart-dev-${CUDA_VERSION} cuda-profiler-api-${CUDA_VERSION} \
-        hip-dev hipcc-nvidia rocm-core \
+        cuda-cuobjdump-${CUDA_VERSION} \
+        hip-dev rocm-core \
     && rm -rf /var/lib/apt/lists/*
 ENV HIP_PLATFORM=nvidia \
     PATH=/opt/openEMS/tools:/opt/openEMS/bin:/opt/rocm/bin:/usr/local/cuda/bin:${PATH}

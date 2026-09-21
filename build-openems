@@ -43,8 +43,17 @@ echo "build-openems: $SRC, HIP platform $PLATFORM, architecture $ARCH"
 build fparser
 build CSXCAD -DFPARSER_ROOT_DIR=$P
 HIP_OPTS="-DCMAKE_HIP_PLATFORM=$PLATFORM -DCMAKE_HIP_ARCHITECTURES=$ARCH"
-# -Wno-deprecated-gpu-targets: nvcc 12.8 warns about the architectures before Turing
-[ "$PLATFORM" = nvidia ] && HIP_OPTS="$HIP_OPTS -DCMAKE_HIP_FLAGS=-Wno-deprecated-gpu-targets"
+# Name the compiler rather than let CMake look for one: the search wants hipcc, which is
+# packaged as hipcc-nvidia here and collides with the hipcc of hip-dev over the same file.
+# Without hipcc there is no hipconfig either, hence the ROCm root as well.
+if [ "$PLATFORM" = nvidia ]; then
+	# -Wno-deprecated-gpu-targets: nvcc 12.8 warns about the architectures before Turing
+	HIP_OPTS="$HIP_OPTS -DCMAKE_HIP_COMPILER=$(command -v nvcc) \
+		-DCMAKE_HIP_COMPILER_ROCM_ROOT=${ROCM_PATH:-/opt/rocm} \
+		-DCMAKE_HIP_FLAGS=-Wno-deprecated-gpu-targets"
+else
+	HIP_OPTS="$HIP_OPTS -DCMAKE_HIP_COMPILER=${ROCM_PATH:-/opt/rocm}/llvm/bin/clang++"
+fi
 build openEMS -DFPARSER_ROOT_DIR=$P -DCSXCAD_ROOT_DIR=$P $HIP_OPTS
 # without a HIP compiler CMake leaves the GPU backend out and the build still succeeds,
 # which is a CPU-only openEMS that looks like a working one until it runs
