@@ -147,7 +147,7 @@ COPY --from=openems-src .git/modules /src/.git/modules
 FROM dev-common AS src-github
 ARG OPENEMS_REPO=SeanMollet/openEMS
 ARG OPENEMS_BRANCH=GPU_experiments
-ARG CSXCAD_COMMIT=a3af8b0e05acf9364408accfc3de109b3be87aa0
+ARG CSXCAD_COMMIT=bd2c133392d93251b640da1f8e2367163f00b7f5
 ARG FPARSER_COMMIT=4b9c845b449b520c4b8c5f23c74cd04820084f81
 # the current commit of the branch: a new one invalidates the clone below
 ADD https://api.github.com/repos/${OPENEMS_REPO}/git/refs/heads/${OPENEMS_BRANCH} /tmp/openems-ref.json
