@@ -69,6 +69,13 @@ RUN git config --system --add safe.directory '*'
 COPY --from=btop /out/usr/local/ /usr/local/
 COPY build-openems run-test run-bench collect-runtime-libs /opt/openEMS/tools/
 COPY sitecustomize.py /opt/openEMS/tools/inject/
+# Like the runtime images, these are meant to run as the invoking user
+# (--user $(id -u):$(id -g)) so that what they write into the mounted /workspace belongs to
+# them. build-openems installs into /opt/openEMS and pip-installs the bindings into its venv,
+# so that tree has to be writable whatever the uid is, and /root is not.
+RUN chmod -R a+rwX /opt/openEMS
+ENV HOME=/tmp \
+    MPLCONFIGDIR=/tmp/matplotlib
 WORKDIR /workspace
 
 # NVIDIA: the CUDA compiler and runtime from NVIDIA's repository, and HIP over them. On this
@@ -212,7 +219,12 @@ COPY --from=openems-build /opt/openEMS/venv /opt/openEMS/venv
 RUN printf '/opt/openEMS/lib\n/opt/openEMS/deps\n' > /etc/ld.so.conf.d/openems.conf && ldconfig \
     && ! find /opt/openEMS -type f \( -name '*.so*' -o -perm -u+x \) -exec ldd {} + 2>/dev/null | grep "not found" \
     && cd /tmp && /opt/openEMS/venv/bin/python -c "import CSXCAD, openEMS, h5py, matplotlib"
-ENV PATH=/opt/openEMS/venv/bin:/opt/openEMS/bin:${PATH}
+# HOME and MPLCONFIGDIR under /tmp, which is writable whatever the uid: the image is meant to
+# run as the invoking user (--user $(id -u):$(id -g)), so that the results it writes into the
+# mounted /workspace belong to them and not to root, and /root is then not writable.
+ENV PATH=/opt/openEMS/venv/bin:/opt/openEMS/bin:${PATH} \
+    HOME=/tmp \
+    MPLCONFIGDIR=/tmp/matplotlib
 WORKDIR /workspace
 
 FROM runtime-amd-base AS runtime-amd
@@ -226,5 +238,10 @@ COPY --from=openems-build-amd /opt/openEMS/venv /opt/openEMS/venv
 RUN printf '/opt/openEMS/lib\n/opt/openEMS/deps\n' > /etc/ld.so.conf.d/openems.conf && ldconfig \
     && ! find /opt/openEMS -type f \( -name '*.so*' -o -perm -u+x \) -exec ldd {} + 2>/dev/null | grep "not found" \
     && cd /tmp && /opt/openEMS/venv/bin/python -c "import CSXCAD, openEMS, h5py, matplotlib"
-ENV PATH=/opt/openEMS/venv/bin:/opt/openEMS/bin:${PATH}
+# HOME and MPLCONFIGDIR under /tmp, which is writable whatever the uid: the image is meant to
+# run as the invoking user (--user $(id -u):$(id -g)), so that the results it writes into the
+# mounted /workspace belong to them and not to root, and /root is then not writable.
+ENV PATH=/opt/openEMS/venv/bin:/opt/openEMS/bin:${PATH} \
+    HOME=/tmp \
+    MPLCONFIGDIR=/tmp/matplotlib
 WORKDIR /workspace

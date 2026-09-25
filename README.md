@@ -48,17 +48,25 @@ Without build.sh, `docker build --target runtime .` builds from GitHub, and
 Runtime:
 
 ```
-docker run --rm --gpus all -v $PWD:/workspace seanmollet/openems python my_simulation.py
+docker run --rm --gpus all --user $(id -u):$(id -g) -v $PWD:/workspace \
+    seanmollet/openems python my_simulation.py
 ```
 
 `python` is the venv's, and `openEMS` and `nf2ff` are on the path.
+
+`--user` makes the simulation results in the mounted directory belong to the invoking user.
+Without it the container runs as root and writes root-owned files into it, which the user
+cannot then delete. The images expect this: they keep `HOME` and the matplotlib
+configuration in `/tmp` and leave `/opt/openEMS` writable, so nothing needs a writable
+`/root`. Only `/workspace` and `/tmp` are written to.
 
 Dev:
 
 1. Sync the sources to `/workspace/openEMS-Project` (fparser, CSXCAD, openEMS and
    `.git/modules/<name>` of each), e.g. with rsync.
 2. `build-openems`: builds into `/opt/openEMS` for the local GPU (`CUDA_ARCH=86`
-   overrides it) and installs the Python bindings. Rebuilds are incremental.
+   overrides it) and installs the Python bindings. Rebuilds are incremental. That tree is
+   writable, so this works under `--user` too and builds nothing you cannot delete.
 3. `run-test <Test> [engine]` runs `openEMS/python/Tests/<Test>.py`, optionally with
    every simulation on the given engine (e.g. `gpu`). `run-bench <script.py> [engine]`
    records the run time and peak host and GPU memory of a script.
